@@ -1,0 +1,245 @@
+---
+title: "Taiwan Map"
+author: "Tiffany Wu"
+date: '2022-08-11'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+# Clear environment
+rm(list=ls()) 
+
+library(tidyverse)
+library(osmdata)
+library(sf)
+library(cowplot)
+library(Rcpp)
+library(reshape2)
+library(colourlovers)
+library(magick)
+library(plotrix)
+
+```
+
+# Map Code from Tanya Shapiro: 
+https://github.com/tashapiro/30DayMapChallenge/blob/main/basel-openstreetmap/basel_map.R 
+```{r map code}
+streets <- getbb("Chiayi Taiwan")%>%
+  opq()%>%
+  add_osm_feature(key = "highway", 
+                  value = c("motorway", "primary", 
+                            "secondary", "tertiary")) %>%
+  osmdata_sf()
+
+
+small_streets <- getbb("Chiayi Taiwan")%>%
+  opq()%>%
+  add_osm_feature(key = "highway", 
+                  value = c("residential", "living_street",
+                            #"unclassified",
+                            "service", "footway")) %>%
+  osmdata_sf()
+
+
+# Pale red
+background_color<-'#1f3a4d'
+street_color<-'#c96961'
+small_street_color<-'#DBC37B'
+
+
+blr_dark<-ggplot() +
+  geom_sf(data = streets$osm_lines,
+          inherit.aes = FALSE,
+          color = street_color,
+          size = .5,
+          alpha = .6) +
+  
+  geom_sf(data = small_streets$osm_lines,
+          inherit.aes = FALSE,
+          color = street_color,
+          size = .3,
+          alpha = .6) +
+
+  theme_void() +
+  theme(
+        plot.margin=unit(c(0.6,1.6,1,1.6),"cm"),
+        plot.background = element_rect(fill = background_color)) +
+  coord_sf(ylim = c(23.3, 23.6), 
+           xlim = c(120.2, 120.6), 
+           expand = FALSE) 
+
+#blr_dark
+
+# Save as PNG
+ggsave(plot = blr_dark, "~/Pictures/chiayimap_plain2.png", width = 3000, height = 3000,
+       units = "px")
+
+```
+
+# Make the map a circle
+```{r Cut out circle from image}
+img <- image_read("~/Pictures/chiayimap_plain2.png")
+print(img)
+
+# Crop image to just see map
+img <- image_crop(img, "1900x1800 + 700 +700")
+
+# get height, width and crop longer side to match shorter side
+ii <- magick::image_info(img)
+ii_min <- min(ii$width, ii$height)
+im1 <- magick::image_crop(img, geometry=paste0(ii_min, "x", ii_min, "+0+0"), repage=TRUE)
+
+# create a new image with white background and black circle
+fig <- magick::image_draw(image_blank(ii_min, ii_min))
+symbols(ii_min/2, ii_min/2, circles=(ii_min/2)-3, bg='black', inches=FALSE, add=TRUE)
+#dev.off()
+
+# create an image composite using both images
+im2 <- magick::image_composite(im1, fig, operator='copyopacity')
+
+# set background as transparent
+magick::image_background(im2, 'none')
+ggsave("~/Pictures/chiayimap_circle.png", bg="transparent")
+```
+
+# Half circle star gradient, code building on Ijeamaka Anyene's radial patterns code:
+https://ijeamaka.art/portfolio/radial_patterns/ 
+```{r circle star gradient}
+num_lines = 4000
+r_vals = seq(0.5, 1.5, by = .01)
+circles_list = list()
+for(i in 1:length(r_vals)){
+  r = r_vals[i]
+  circle = tibble(
+    len = seq(0, 2*pi, length.out = num_lines),
+    x = r*sin(len),
+    y = r*cos(len))
+  circles_list[[i]] = circle[sample(1:num_lines,
+                                  num_lines/i,
+                                  replace = FALSE),]
+}
+final_circle = bind_rows(circles_list)
+
+# Half Circle- red
+final_circle <- final_circle %>% filter(y <= 0)
+p <- ggplot() +
+  geom_point(data = final_circle,
+             aes(x = x, y = y),
+             color = "#c96961",
+             size = 0.1,
+             alpha = 0.2) +
+  coord_fixed() +
+  theme_void() +
+  theme(panel.background = element_rect(fill = "transparent"))
+
+ggsave(bg="transparent", "~/Pictures/stars_bottom.png", width =7, height=7)
+
+# Get rid of border
+# Crop image to just see map
+p <- image_read("~/Pictures/stars_bottom.png")
+new_p <- image_crop(p, "1500x500 +300 +600")
+ggsave(bg="transparent", "~/Pictures/stars_bottom_red.png")
+
+# Yellow
+p <- ggplot() +
+  geom_point(data = final_circle,
+             aes(x = x, y = y),
+             color = "#E1C57F",
+             size = 0.1,
+             alpha = 0.06) +
+  coord_fixed() +
+  theme_void() +
+  theme(panel.background = element_rect(fill = "transparent"))
+ggsave(plot = p, bg="transparent", "~/Pictures/stars_bottom_yellow.png")
+p <- image_read("~/Pictures/stars_bottom_yellow.png")
+new_p <- image_crop(p, "1500x500 +300 +600")
+ggsave(plot = new_p, bg="transparent", "~/Pictures/stars_bottom_yellow.png")
+
+```
+
+# Circle Outline
+```{r}
+# Circle outline for map
+circle_border <- grid::circleGrob(gp = grid::gpar(col = "#c96961",
+                                                  lwd = 1.5,
+                                                  alpha = 1))
+```
+
+# Yellow Half Circles
+```{r Half Circles}
+circleFun <- function(center = c(0,0),diameter = 1, npoints = 100){
+    r = diameter / 2
+    tt <- seq(0,2*pi,length.out = npoints)
+    xx <- center[1] + r * cos(tt)
+    yy <- center[2] + r * sin(tt)
+    return(data.frame(x = xx, y = yy))
+}
+
+half_circle_data <- circleFun(npoints = 100)
+half_circle_data <- half_circle_data %>% filter(y>=-0.01)
+# Add a point so half circle is even on both sides
+xy <- data.frame(-0.5, 0)
+names(xy) <- c("x", "y")
+half_circle_data <-rbind(half_circle_data, xy)
+#geom_path will do open circles, geom_polygon will do filled circles
+big_circle <- ggplot(half_circle_data,aes(x,y)) + 
+  geom_path(color = "#E1C57F",
+            size = 3,
+            alpha = 0.45) +
+  theme_void()
+ggsave(plot = big_circle, bg="transparent", "~/Pictures/half_circle_thick.png", width = 7.7, height = 4.1)
+
+middle_circle <- ggplot(half_circle_data,aes(x,y)) + 
+  geom_path(color = "#E1C57F",
+            size = 2.2,
+            alpha = 0.55) +
+  theme_void()
+ggsave(plot = middle_circle, bg="transparent", "~/Pictures/half_circle_middle.png", width = 7.7, height = 4.1)
+
+small_circle <- ggplot(half_circle_data,aes(x,y)) + 
+  geom_path(color = "#E1C57F",
+            size = 1.2,
+            alpha = 0.7) +
+  theme_void()
+ggsave(plot = small_circle, bg="transparent", "~/Pictures/half_circle_small.png", width = 7.7, height = 4.1)
+```
+
+# Top Left Circle
+# Circle Outline
+```{r}
+# Circle outline for map
+circle_border2 <- grid::circleGrob(gp = grid::gpar(col = "#c96961",
+                                                   fill = "#c96961",
+                                                  lwd = 0.5,
+                                                  alpha = 0.8))
+```
+
+# Put it all together
+```{r}
+# Put it all together
+map <- ggdraw() +
+   draw_grob(circle_border, scale = 0.501) +
+   draw_image("~/Pictures/chiayimap_circle.png", x=0, y=0,
+              scale = 0.5) +
+   draw_image("~/Pictures/stars_bottom_red.png",
+               scale = 0.73, x=0.00, y =-0.22) +
+   draw_image("~/Pictures/stars_bottom_yellow.png",
+               scale = 0.9, x=0.00, y =-0.265) +
+   theme(plot.background = element_rect(fill = "#262626", color = NA)) +
+   draw_image("~/Pictures/half_circle_thick.png",
+               scale = 0.425, x=0.00, y =0.145)+
+   draw_image("~/Pictures/half_circle_middle.png",
+               scale = 0.4, x=0.00, y =0.133)+
+   draw_image("~/Pictures/half_circle_small.png",
+               scale = 0.37, x=0.00, y =0.122) +
+   draw_grob(circle_border2, scale = 0.025,
+             x = -0.19, y = 0.35)
+# ggsave(plot = map, bg="transparent", "~/Pictures/chiayi_map.png")
+
+# Crop
+map_final <- image_read("~/Pictures/chiayi_map.png")
+image_crop(map_final, "620x2500!+360 + 70")
+
+# Save!
+
+```
